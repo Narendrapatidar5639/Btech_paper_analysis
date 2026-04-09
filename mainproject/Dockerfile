@@ -11,3 +11,6 @@ COPY . .
 
 # Django ko run karne ke liye
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+# Pura code copy hone ke baad
+CMD ["gunicorn", "mainproject.wsgi:application", "--bind", "0.0.0.0:8000"]
