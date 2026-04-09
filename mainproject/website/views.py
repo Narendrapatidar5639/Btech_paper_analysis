@@ -13,7 +13,11 @@ import json
 import os
 from groq import Groq
 from dotenv import load_dotenv
-from pdf2image import convert_from_path
+try:
+    from pdf2image import convert_from_path
+except ImportError:
+    convert_from_path = None
+    print("Warning: pdf2image not installed. PDF conversion will be disabled.")
 
 # Import models
 from .models import University, Branch, Subject, Paper, AnalysisReport

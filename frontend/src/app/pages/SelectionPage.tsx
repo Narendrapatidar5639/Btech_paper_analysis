@@ -20,7 +20,7 @@ import { useAuth } from "../contexts/AuthContext";
 // Assuming you have a theme context, if not, it will default to dark logic
 // import { useTheme } from "../contexts/ThemeContext"; 
 
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+import { API_BASE_URL } from '../../config';
 
 const TESTIMONIALS = [
   { id: 1, name: "Rahul Sharma", role: "CS Student", text: "PatternBTech made my RGPV exam prep so much easier!" },
