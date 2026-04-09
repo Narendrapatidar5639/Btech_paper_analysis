@@ -1,0 +1,13 @@
+# Environments
+bpa/
+.env
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+
+# Local data
+db.sqlite3
+media/
