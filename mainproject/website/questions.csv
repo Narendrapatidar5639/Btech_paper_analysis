@@ -1,0 +1,7 @@
+import csv
+
+def save_questions_to_csv(paper_id, questions):
+    with open("questions.csv", "a", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for q in questions:
+            writer.writerow([paper_id, q])
