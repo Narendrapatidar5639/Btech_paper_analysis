@@ -288,44 +288,86 @@ def api_login(request):
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
 
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.models import User
+from django.contrib.auth import login
+
 @csrf_exempt
 def api_signup(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        email = data.get('email')
-        if User.objects.filter(username=email).exists():
-            return JsonResponse({"error": "User already exists"}, status=400)
-        
-        name_parts = data.get('full_name', '').split(' ', 1)
-        user = User.objects.create_user(
-            username=email, email=email, password=data.get('password'),
-            first_name=name_parts[0], last_name=name_parts[1] if len(name_parts) > 1 else ""
-        )
-        return JsonResponse({"status": "success"}, status=201)
+        try:
+            data = json.loads(request.body)
+            email = data.get('email')
+            password = data.get('password')
+            full_name = data.get('full_name', '')
+
+            if not email or not password:
+                return JsonResponse({"error": "Email and password are required"}, status=400)
+
+            if User.objects.filter(username=email).exists():
+                return JsonResponse({"error": "User already exists"}, status=400)
+            
+            name_parts = full_name.split(' ', 1)
+            user = User.objects.create_user(
+                username=email, 
+                email=email, 
+                password=password,
+                first_name=name_parts[0], 
+                last_name=name_parts[1] if len(name_parts) > 1 else ""
+            )
+            return JsonResponse({"status": "success", "message": "User created"}, status=201)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    
+    # Correction: Handle non-POST requests
+    return JsonResponse({"error": "Method Not Allowed"}, status=405)
 
 @csrf_exempt
 def api_forgot_password(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        email = data.get('email')
-        if User.objects.filter(email=email).exists():
-            return JsonResponse({"message": "Password reset link sent"}, status=200)
-        return JsonResponse({"error": "Email not found"}, status=404)
+        try:
+            data = json.loads(request.body)
+            email = data.get('email')
+            if User.objects.filter(email=email).exists():
+                return JsonResponse({"message": "Password reset link sent"}, status=200)
+            return JsonResponse({"error": "Email not found"}, status=404)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
 
-# ----------------- Firebase & Google Auth -----------------
+    # Correction: Handle non-POST requests
+    return JsonResponse({"error": "Method Not Allowed"}, status=405)
+
 @csrf_exempt
 def google_auth(request):
-    # Firebase init should ideally be in apps.py, keeping here as per your original
-    try:
-        data = json.loads(request.body)
-        # Firebase verification logic here...
-        user, _ = User.objects.get_or_create(username=data.get('email'), defaults={'email': data.get('email')})
-        if not hasattr(user, 'backend'):
-            user.backend = 'django.contrib.auth.backends.ModelBackend'
-        login(request, user)
-        return JsonResponse({"status": "success", "user": {"full_name": user.first_name or user.username}})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=401)
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            email = data.get('email')
+            
+            if not email:
+                return JsonResponse({"error": "Email is required"}, status=400)
+
+            # user, created ka use karein taaki code clean rahe
+            user, created = User.objects.get_or_create(
+                username=email, 
+                defaults={'email': email, 'first_name': data.get('full_name', '')}
+            )
+            
+            if not hasattr(user, 'backend'):
+                user.backend = 'django.contrib.auth.backends.ModelBackend'
+            
+            login(request, user)
+            return JsonResponse({
+                "status": "success", 
+                "user": {"full_name": user.first_name or user.username}
+            })
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=401)
+            
+    # Correction: Handle non-POST requests
+    return JsonResponse({"error": "Method Not Allowed"}, status=405)
 
 @csrf_exempt
 def log_admin_activity(request):
