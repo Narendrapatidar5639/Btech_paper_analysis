@@ -23,8 +23,8 @@ export function AdminAuthPage() {
     setIsLoading(true);
 
     try {
-      // --- BACKEND API FIX ---
-      const response = await fetch("http://127.0.0.1:8000/api/admin/login/", {
+      // --- BACKEND API FIX ---const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
+      const response = await fetch("https://pattern-btech-backend.onrender.com/api/admin/login/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

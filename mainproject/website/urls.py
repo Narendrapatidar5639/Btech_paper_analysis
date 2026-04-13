@@ -1,9 +1,10 @@
 from django.urls import path
-from . import views
+from website import views
 from .views import api_login, api_signup, api_forgot_password
 
 # In sab ke peeche 'api/' automatically lag jayega main urls.py ki wajah se
 urlpatterns = [
+
     path('selection-metadata/', views.select_details, name='select_metadata'),
     path('papers/', views.show_papers, name='papers'),
     path('dashboard/', views.analysis_dashboard, name='dashboard'),

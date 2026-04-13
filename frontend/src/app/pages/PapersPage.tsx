@@ -18,7 +18,7 @@ interface Paper {
 }
 
 const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
-const MEDIA_BASE_URL = "http://127.0.0.1:8000/media/";
+const MEDIA_BASE_URL = "https://pattern-btech-backend.onrender.com/media/";
 
 export function PapersPage() {
   const navigate = useNavigate();

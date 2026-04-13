@@ -32,8 +32,8 @@ export function AdminUploadPage() {
 
   // API Logic (Same as before)
   const fetchMetadata = async () => {
-    try {
-      const response = await fetch("http://127.0.0.1:8000/api/selection-metadata/");
+    try {//const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
+      const response = await fetch("https://pattern-btech-backend.onrender.com/api/selection-metadata/");
       const data = await response.json();
       setUniversities(data.universities || []);
       setCourses(data.branches || []);

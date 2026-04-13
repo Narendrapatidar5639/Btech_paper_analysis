@@ -35,8 +35,8 @@ export function AdminReportsPage() {
   const [loading, setLoading] = useState(true);
 
   const fetchData = async () => {
-    try {
-      const response = await fetch("http://127.0.0.1:8000/api/admin/reports/");
+    try {//const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
+      const response = await fetch("https://pattern-btech-backend.onrender.com/api/admin/reports/");
       const data = await response.json();
       if (response.ok) {
         setReports(data.reports);

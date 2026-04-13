@@ -37,7 +37,8 @@ export function AdminDashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/admin/dashboard-stats/");
+      //const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
+      const response = await fetch("https://pattern-btech-backend.onrender.com/api/admin/dashboard-stats/");
       const data = await response.json();
       if (response.ok) {
         setStatsData(data.stats);
