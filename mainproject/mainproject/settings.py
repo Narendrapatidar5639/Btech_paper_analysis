@@ -14,7 +14,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"] # Development ke liye simple rakha hai
+ALLOWED_HOSTS = ['https://pattern-btech-backend.onrender.com', 'localhost', '127.0.0.1']
 
 
 # --- APPLICATION DEFINITION ---
@@ -78,13 +78,12 @@ DATABASES = {
 # --- CORS & SESSION SETTINGS (Admin Name Fix) ---
 
 # 1. Credentials enable karein taaki Session/Cookie pass ho sake
-CORS_ALLOW_CREDENTIALS = True
-
-# 2. Specific origins allow karein (Wildcard '*' credentials ke saath kaam nahi karta)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "https://patternbtech.vercel.app/",
+    "http://localhost:5173", # Vite local testing ke liye
 ]
+
+CORS_ALLOW_CREDENTIALS = True
 
 # 3. CSRF ke liye origins trust karein
 CSRF_TRUSTED_ORIGINS = [
