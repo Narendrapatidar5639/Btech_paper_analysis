@@ -14,8 +14,12 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['https://pattern-btech-backend.onrender.com', 'localhost', '127.0.0.1']
-
+ALLOWED_HOSTS = [
+    'pattern-btech-backend.onrender.com', 
+    'localhost', 
+    '127.0.0.1',
+    '.onrender.com' # Ye saare render subdomains allow kar dega
+]
 
 # --- APPLICATION DEFINITION ---
 
@@ -79,7 +83,7 @@ DATABASES = {
 
 # 1. Credentials enable karein taaki Session/Cookie pass ho sake
 CORS_ALLOWED_ORIGINS = [
-    "https://patternbtech.vercel.app/",
+    "https://patternbtech.vercel.app",
     "http://localhost:5173", # Vite local testing ke liye
 ]
 
@@ -89,6 +93,7 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://patternbtech.vercel.app",
 ]
 
 # 4. SameSite settings taaki cookies cross-origin block na hon
