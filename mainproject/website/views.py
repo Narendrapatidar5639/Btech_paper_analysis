@@ -225,12 +225,18 @@ def create_metadata(request):
 @csrf_exempt
 def admin_login_view(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        user = authenticate(username=data.get('username'), password=data.get('password'))
-        if user and user.is_staff:
-            login(request, user)
-            return JsonResponse({'status': 'success', 'user': user.username})
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+        try:
+            data = json.loads(request.body)
+            user = authenticate(username=data.get('username'), password=data.get('password'))
+            if user and user.is_staff:
+                login(request, user)
+                return JsonResponse({'status': 'success', 'user': user.username})
+            return JsonResponse({'error': 'Unauthorized'}, status=401)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+    # ⬇️ YE LINE ADD KAREIN (GET requests handle karne ke liye)
+    return JsonResponse({'error': 'Method Not Allowed. Please use POST.'}, status=405)
 
 @csrf_exempt
 def admin_logout_view(request):
