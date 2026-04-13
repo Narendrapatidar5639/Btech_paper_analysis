@@ -18,9 +18,9 @@ import { GlassCard } from "../components/GlassCard";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 // Assuming you have a theme context, if not, it will default to dark logic
-// import { useTheme } from "../contexts/ThemeContext"; 
+// import { useTheme } from "../contexts/ThemeContext";
 
-import { API_BASE_URL } from '../../config';
+const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
 
 const TESTIMONIALS = [
   { id: 1, name: "Rahul Sharma", role: "CS Student", text: "PatternBTech made my RGPV exam prep so much easier!" },
@@ -56,7 +56,7 @@ export function SelectionPage() {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/selection-metadata/`, {
+        const response = await fetch("https://pattern-btech-backend.onrender.com/api/selection-metadata/", {
           method: "GET",
           credentials: "include",
           headers: { "Content-Type": "application/json" }
