@@ -24,4 +24,4 @@ ENV PORT=7860
 EXPOSE 7860
 
 # Is command mein thoda change (wsgi ka path verify karein)
-CMD ["sh", "-c", "python manage.py migrate && gunicorn mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]
+CMD ["sh", "-c", "python manage.py migrate && gunicorn --chdir mainproject mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]

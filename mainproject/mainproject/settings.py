@@ -61,8 +61,8 @@ TEMPLATES = [
     },
 ]
 
-ROOT_URLCONF = "mainproject.mainproject.urls"
-WSGI_APPLICATION = "mainproject.mainproject.wsgi.application"
+ROOT_URLCONF = "mainproject.urls"
+WSGI_APPLICATION = "mainproject.wsgi.application"
 
 # --- DATABASE (Supabase / Postgres) ---
 
