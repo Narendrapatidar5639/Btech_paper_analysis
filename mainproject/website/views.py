@@ -1,3 +1,6 @@
+import json
+import os
+from django.conf import settings
 from django.db import models
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -9,10 +12,14 @@ from django.utils import timezone
 from django.db.models import Count
 from django.contrib.auth.decorators import login_required
 
-import json
-import os
+# External Libraries
 from groq import Groq
 from dotenv import load_dotenv
+from pdf2image import convert_from_path
+
+# Firebase
+import firebase_admin
+from firebase_admin import credentials, auth as firebase_auth
 
 # Import models
 from .models import University, Branch, Subject, Paper, AnalysisReport
@@ -23,26 +30,40 @@ load_dotenv()
 # Initialize Groq Client
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# ---------------- Heavy Libraries Safety Load ----------------
-try:
-    from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-    from pdf2image import convert_from_path
-    # Load models only if libraries are present
-    processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
-    model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
-except Exception as e:
-    processor = None
-    model = None
-    convert_from_path = None
-    print(f"⚠️ Heavy libraries (TrOCR/pdf2image) not loaded: {e}")
+# ---------------- LAZY LOAD TR-OCR (Server Optimization) ----------------
+_processor = None
+_model = None
+
+def get_ocr_resources():
+    global _processor, _model
+    if _processor is None or _model is None:
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+        _processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
+        _model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
+    return _processor, _model
+
+# Firebase Initialization
+if not firebase_admin._apps:
+    try:
+        firebase_creds = {
+            "type": "service_account",
+            "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+            "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+            "private_key": os.getenv("FIREBASE_PRIVATE_KEY").replace('\\n', '\n'),
+            "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        cred = credentials.Certificate(firebase_creds)
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        print(f"Firebase Init Warning: {e}")
 
 # ---------------- API HELPER FUNCTIONS ----------------
 
 def trocr_pdf_to_text(pdf_path):
     text = ""
-    if not convert_from_path or not processor:
-        return "OCR Service temporarily unavailable on this node."
     try:
+        processor, model = get_ocr_resources()
         images = convert_from_path(pdf_path)
         for img in images:
             pixel_values = processor(images=img, return_tensors="pt").pixel_values
@@ -79,7 +100,6 @@ def home(request):
     return JsonResponse({'status': 'Backend API is running'})
 
 def select_details(request):
-    """Returns dropdown data for the SelectionPage"""
     universities = list(University.objects.values('id', 'name'))
     branches = list(Branch.objects.values('id', 'name'))
     return JsonResponse({
@@ -88,7 +108,6 @@ def select_details(request):
     }, safe=False)
 
 def get_subjects(request):
-    """Filters subjects based on branch and semester"""
     branch_id = request.GET.get('branch') 
     semester = request.GET.get('semester')
     subjects = Subject.objects.filter(
@@ -123,72 +142,72 @@ def show_papers(request):
         return JsonResponse(paper_list, safe=False)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-    
+
 def analysis_dashboard(request):
     paper_ids_raw = request.GET.get('paperIds') or request.GET.get('ids')
     if not paper_ids_raw:
         return JsonResponse({'error': 'No papers selected'}, status=400)
 
     try:
-        clean_ids = paper_ids_raw.replace('[','').replace(']','')
+        clean_ids = str(paper_ids_raw).replace('[','').replace(']','')
         paper_ids = [int(pid) for pid in clean_ids.split(',') if pid.strip()]
         papers = Paper.objects.filter(id__in=paper_ids)
         
-        all_text = ""
-        
-        # DEBUG: Check if papers are found
-        print(f"DEBUG: Found {papers.count()} papers in DB.")
+        if not papers.exists():
+            return JsonResponse({'error': 'Papers not found in DB'}, status=404)
 
+        all_text = ""
+        # Local or Server OCR handling
         for paper in papers:
             if paper.ocr_text and len(paper.ocr_text) > 50:
-                print(f"DEBUG: Using cached OCR for Paper {paper.id}")
                 all_text += paper.ocr_text + " "
             else:
-                print(f"🔍 Extracting fresh text for Paper ID: {paper.id}")
                 try:
-                    from docling.document_converter import DocumentConverter
-                    converter = DocumentConverter()
+                    # Server par file.path fail ho sakta hai agar cloud use ho raha ho
+                    try:
+                        file_path = paper.pdf_file.path
+                    except:
+                        file_path = paper.pdf_file.url
                     
-                    # File Source check
-                    # HF par path use karna zyada safe hota hai agar media local hai
-                    file_source = paper.pdf_file.path 
-                    print(f"DEBUG: File path: {file_source}")
-
-                    result = converter.convert(file_source)
-                    text = result.document.export_to_markdown()
-                    
+                    text = trocr_pdf_to_text(file_path)
                     if text:
                         paper.ocr_text = text
+                        paper.processed = True
                         paper.save()
                         all_text += text + " "
-                        print(f"DEBUG: Successfully extracted {len(text)} characters.")
-                except Exception as e:
-                    print(f"⚠️ Extraction failed for {paper.id}: {str(e)}")
+                except Exception as ocr_err:
+                    print(f"OCR Error for Paper {paper.id}: {ocr_err}")
 
-        # DEBUG: Check if all_text is empty
-        if not all_text.strip():
-            print("❌ ERROR: all_text is empty after OCR loop!")
-            return JsonResponse({'error': 'No text could be extracted from these papers.'}, status=200)
-
-        # Analysis logic
-        print(f"DEBUG: Sending {len(all_text)} chars to Groq.")
         analysis_result = get_semantic_analysis(all_text)
-        print(f"DEBUG: Groq returned: {analysis_result}")
+
+        # Logging
+        try:
+            first_paper = papers.first()
+            target_user = request.user if request.user.is_authenticated else None
+            AnalysisReport.objects.create(
+                user=target_user,
+                subject=first_paper.subject if first_paper else None,
+                paper=first_paper,
+                status='completed'
+            )
+        except Exception as save_error:
+            print(f"Report Logging Error: {save_error}")
 
         return JsonResponse({
             'topics': analysis_result.get("topics", {}),
             'questions': analysis_result.get("questions", {}),
             'metadata': {
                 'paper_count': papers.count(),
-                'text_length': len(all_text), # Naya field track karne ke liye
+                'analyzed_ids': paper_ids,
+                'user': request.user.username if request.user.is_authenticated else "Guest",
                 'status': 'Neural Link Synchronized'
             }
         })
     except Exception as e:
-        print(f"🚨 Dashboard Exception: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=500)
-    
-    
+        return JsonResponse({'error': f"Server Pipeline Error: {str(e)}"}, status=500)
+
+# ---------------- ADMIN UPLOAD & METADATA ----------------
+
 @csrf_exempt
 def admin_upload_papers(request):
     if request.method == 'POST':
@@ -199,102 +218,72 @@ def admin_upload_papers(request):
             subject_id = request.POST.get('subject')
             files = request.FILES.getlist('files')
 
+            if not files:
+                return JsonResponse({'error': 'No files provided'}, status=400)
+
             university = get_object_or_404(University, id=uni_id)
             branch = get_object_or_404(Branch, id=branch_id)
             subject = get_object_or_404(Subject, id=subject_id)
 
-            # OCR Converter initialize karein
-            from docling.document_converter import DocumentConverter
-            converter = DocumentConverter()
-
             uploaded_count = 0
             for f in files:
-                # 1. Pehle paper create karein
-                new_paper = Paper.objects.create(
+                Paper.objects.create(
                     university=university,
                     branch=branch,
                     semester=semester,
                     subject=subject,
                     pdf_file=f
                 )
-                
-                # 2. Turant OCR karein
-                try:
-                    print(f"📄 Processing OCR for: {f.name}")
-                    # Path use karein kyunki file abhi server par hai
-                    result = converter.convert(new_paper.pdf_file.path)
-                    extracted_text = result.document.export_to_markdown()
-                    
-                    if extracted_text:
-                        new_paper.ocr_text = extracted_text
-                        new_paper.save()
-                        print(f"✅ OCR Done for {f.name}")
-                except Exception as e:
-                    print(f"⚠️ OCR Failed for {f.name}: {e}")
-
                 uploaded_count += 1
 
-            return JsonResponse({'message': f'Uploaded and Processed {uploaded_count} papers.', 'status': 'success'}, status=201)
+            return JsonResponse({
+                'message': f'Successfully uploaded {uploaded_count} papers.',
+                'status': 'success'
+            }, status=201)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'error': 'Invalid method'}, status=405)
+    return JsonResponse({'error': 'Invalid request method'}, status=405)
 
 @csrf_exempt
 def create_metadata(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
-        meta_type = data.get('type')
-        name = data.get('name')
-        obj = None
-        if meta_type == 'university':
-            obj = University.objects.create(name=name)
-        elif meta_type == 'branch':
-            obj = Branch.objects.create(name=name)
-        elif meta_type == 'subject':
-            branch = Branch.objects.get(id=data.get('branch_id'))
-            obj = Subject.objects.create(name=name, branch=branch, semester=data.get('semester'))
-        return JsonResponse({'id': obj.id, 'status': 'created'})
+        try:
+            data = json.loads(request.body)
+            meta_type = data.get('type')
+            name = data.get('name')
+            obj = None
+            if meta_type == 'university':
+                obj = University.objects.create(name=name)
+            elif meta_type == 'branch':
+                obj = Branch.objects.create(name=name)
+            elif meta_type == 'subject':
+                branch = Branch.objects.get(id=data.get('branch_id'))
+                obj = Subject.objects.create(name=name, branch=branch, semester=data.get('semester'))
+            
+            return JsonResponse({'id': obj.id if obj else None, 'status': 'created'})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+# ---------------- AUTHENTICATION VIEWS ----------------
 
 @csrf_exempt
 def admin_login_view(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
-            user = authenticate(username=data.get('username'), password=data.get('password'))
-            if user and user.is_staff:
+            user = authenticate(request, username=data.get('username'), password=data.get('password'))
+            if user is not None and user.is_staff:
                 login(request, user)
-                return JsonResponse({'status': 'success', 'user': user.username})
-            return JsonResponse({'error': 'Unauthorized'}, status=401)
+                return JsonResponse({'status': 'success', 'user': user.username}, status=200)
+            return JsonResponse({'error': 'Access denied or invalid credentials'}, status=401)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=400)
-
-    # ⬇️ YE LINE ADD KAREIN (GET requests handle karne ke liye)
-    return JsonResponse({'error': 'Method Not Allowed. Please use POST.'}, status=405)
+            return JsonResponse({'error': str(e)}, status=500)
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 @csrf_exempt
 def admin_logout_view(request):
     logout(request)
-    return JsonResponse({'message': 'Logged out successfully'})
-
-def admin_reports_api(request):
-    try:
-        reports_qs = AnalysisReport.objects.all().order_by('-created_at')
-        reports_list = [{
-            "id": r.id,
-            "title": f"{r.subject.name if r.subject else 'General'} Report",
-            "date": r.created_at.strftime("%B %d, %Y"),
-            "status": r.status.lower()
-        } for r in reports_qs[:20]]
-
-        return JsonResponse({
-            "reports": reports_list,
-            "stats": {
-                "totalReports": AnalysisReport.objects.count(),
-                "totalPapers": Paper.objects.count(),
-            }
-        })
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+    return JsonResponse({'message': 'Logged out successfully'}, status=200)
 
 @csrf_exempt
 def api_login(request):
@@ -303,15 +292,14 @@ def api_login(request):
             data = json.loads(request.body)
             email = data.get('email')
             password = data.get('password')
-            is_google_login = data.get('is_google', False)
+            is_google = data.get('is_google', False)
 
-            if is_google_login:
-                user, created = User.objects.get_or_create(username=email, defaults={'email': email})
-                if not created and data.get('full_name'):
-                    name_parts = data.get('full_name').split(' ', 1)
-                    user.first_name = name_parts[0]
-                    user.last_name = name_parts[1] if len(name_parts) > 1 else ""
-                    user.save()
+            if is_google:
+                full_name = data.get('full_name', '')
+                parts = full_name.split(' ', 1)
+                first = parts[0]
+                last = parts[1] if len(parts) > 1 else ""
+                user, _ = User.objects.get_or_create(username=email, defaults={'email': email, 'first_name': first, 'last_name': last})
             else:
                 user = authenticate(username=email, password=password)
 
@@ -319,19 +307,15 @@ def api_login(request):
                 if not hasattr(user, 'backend'):
                     user.backend = 'django.contrib.auth.backends.ModelBackend'
                 login(request, user)
+                display_name = f"{user.first_name} {user.last_name}".strip() or user.username
                 return JsonResponse({
-                    "status": "success",
-                    "user": {"username": user.username, "full_name": f"{user.first_name} {user.last_name}".strip() or user.username}
+                    "status": "success", 
+                    "user": {"username": user.username, "email": user.email, "full_name": display_name},
+                    "redirect_url": "/selection"
                 })
             return JsonResponse({"error": "Invalid credentials"}, status=401)
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
-
-import json
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth.models import User
-from django.contrib.auth import login
 
 @csrf_exempt
 def api_signup(request):
@@ -339,130 +323,116 @@ def api_signup(request):
         try:
             data = json.loads(request.body)
             email = data.get('email')
-            password = data.get('password')
-            full_name = data.get('full_name', '')
-
-            if not email or not password:
-                return JsonResponse({"error": "Email and password are required"}, status=400)
-
             if User.objects.filter(username=email).exists():
                 return JsonResponse({"error": "User already exists"}, status=400)
             
-            name_parts = full_name.split(' ', 1)
-            user = User.objects.create_user(
-                username=email, 
-                email=email, 
-                password=password,
-                first_name=name_parts[0], 
-                last_name=name_parts[1] if len(name_parts) > 1 else ""
+            parts = data.get('full_name', '').split(' ', 1)
+            User.objects.create_user(
+                username=email, email=email, password=data.get('password'),
+                first_name=parts[0], last_name=parts[1] if len(parts) > 1 else ""
             )
-            return JsonResponse({"status": "success", "message": "User created"}, status=201)
+            return JsonResponse({"status": "success"}, status=201)
         except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
-    
-    # Correction: Handle non-POST requests
-    return JsonResponse({"error": "Method Not Allowed"}, status=405)
+            return JsonResponse({"error": str(e)}, status=400)
 
 @csrf_exempt
 def api_forgot_password(request):
     if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            email = data.get('email')
-            if User.objects.filter(email=email).exists():
-                return JsonResponse({"message": "Password reset link sent"}, status=200)
-            return JsonResponse({"error": "Email not found"}, status=404)
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
-
-    # Correction: Handle non-POST requests
-    return JsonResponse({"error": "Method Not Allowed"}, status=405)
+        data = json.loads(request.body)
+        if User.objects.filter(email=data.get('email')).exists():
+            return JsonResponse({"message": "Password reset link sent"}, status=200)
+        return JsonResponse({"error": "Email not found"}, status=404)
 
 @csrf_exempt
 def google_auth(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
-            email = data.get('email')
-            
-            if not email:
-                return JsonResponse({"error": "Email is required"}, status=400)
-
-            # user, created ka use karein taaki code clean rahe
-            user, created = User.objects.get_or_create(
-                username=email, 
-                defaults={'email': email, 'first_name': data.get('full_name', '')}
-            )
+            decoded_token = firebase_auth.verify_id_token(data.get('token'))
+            email = decoded_token.get('email')
+            user, _ = User.objects.get_or_create(username=email, defaults={'email': email, 'first_name': decoded_token.get('name', '')})
             
             if not hasattr(user, 'backend'):
                 user.backend = 'django.contrib.auth.backends.ModelBackend'
-            
             login(request, user)
-            return JsonResponse({
-                "status": "success", 
-                "user": {"full_name": user.first_name or user.username}
-            })
+            return JsonResponse({"status": "success", "user": {"email": user.email, "full_name": user.first_name or user.username}, "redirect_url": "/selection"})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=401)
-            
-    # Correction: Handle non-POST requests
-    return JsonResponse({"error": "Method Not Allowed"}, status=405)
+
+# ---------------- DASHBOARD & STATS ----------------
+
+def admin_reports_api(request):
+    try:
+        reports_qs = AnalysisReport.objects.select_related('subject', 'paper__university').order_by('-created_at')
+        reports_list = [{
+            "id": r.id,
+            "title": f"{r.subject.name} Analysis" if r.subject else "Untitled",
+            "university": r.paper.university.name if r.paper and r.paper.university else "N/A",
+            "semester": f"Sem {r.subject.semester}" if r.subject else "N/A",
+            "date": r.created_at.strftime("%B %d, %Y"),
+            "status": r.status.lower(),
+        } for r in reports_qs]
+
+        papers_qs = Paper.objects.select_related('university', 'subject').order_by('-id')[:10]
+        uploaded_papers = [{
+            "id": p.id,
+            "name": os.path.basename(p.pdf_file.name),
+            "university": p.university.name if p.university else "N/A",
+            "url": p.pdf_file.url if p.pdf_file else "#"
+        } for p in papers_qs]
+
+        return JsonResponse({
+            "reports": reports_list,
+            "uploadedPapers": uploaded_papers,
+            "stats": {
+                "totalReports": len(reports_list),
+                "totalPapers": Paper.objects.count(),
+                "thisMonth": AnalysisReport.objects.filter(created_at__month=timezone.now().month).count()
+            }
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def log_admin_activity(request):
-    if request.method != 'POST':
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    try:
-        data = json.loads(request.body or '{}')
-        subject_name = data.get('subject_name')
-        
-        # 1. Subject ko dhundne ka safe tarika
-        subject_obj = None
-        if subject_name:
-            subject_obj = Subject.objects.filter(name__iexact=subject_name).first()
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body or '{}')
+            subject_obj = Subject.objects.filter(name=data.get('subject_name')).first()
+            AnalysisReport.objects.create(
+                user_name=data.get('user_name', 'Guest User'),
+                subject=subject_obj,
+                semester=data.get('semester', 'N/A'),
+                status='completed' 
+            )
+            return JsonResponse({"status": "success"}, status=201)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
 
-        # 2. IntegrityError se bachne ke liye logic
-        # Agar subject_obj nahi milta, toh hum use save hi nahi karenge 
-        # ya fir model mein null=True karna padega. 
-        # Filhaal hum isse crash hone se bacha rahe hain:
-        
-        if not subject_obj:
-            print(f"⚠️ Warning: Subject '{subject_name}' not found in DB. Activity might not log.")
-            # Agar subject compulsory hai toh yahan error return kar sakte hain
-            # return JsonResponse({"error": "Invalid subject name"}, status=400)
-
-        AnalysisReport.objects.create(
-            user_name=data.get('user_name', 'Guest User'),
-            subject=subject_obj, # Agar ye None raha toh NOT NULL error aayega
-            semester=data.get('semester', 'N/A'),
-            paper_count=data.get('paper_count', 1),
-            status='completed' 
-        )
-        return JsonResponse({"status": "success"}, status=201)
-    except Exception as e:
-        print(f"❌ Logging Error: {str(e)}")
-        return JsonResponse({"error": str(e)}, status=400)
-    
 def get_admin_stats(request):
     try:
         total_users = User.objects.count()
         analysis_runs = AnalysisReport.objects.count()
-        activity_list = []
-        recent_activities = AnalysisReport.objects.all().order_by('-created_at')[:10]
         
+        recent_activities = AnalysisReport.objects.all().order_by('-created_at')[:10]
+        activity_list = []
         for act in recent_activities:
             user_display = act.user_name or (act.user.username if act.user else "Guest User")
             activity_list.append({
                 "user": user_display,
+                "initial": user_display[0].upper(),
                 "time": timesince(act.created_at) + " ago",
-                "status": act.status.capitalize()
+                "subject": act.subject.name if act.subject else "General Analysis",
+                "status": act.status.capitalize() 
             })
 
         return JsonResponse({
             "stats": {
-                "totalUsers": total_users,
-                "analysisRuns": analysis_runs,
+                "totalUsers": f"{total_users:,}",
+                "analysisRuns": f"{analysis_runs:,}",
+                "activeSubjects": Subject.objects.count(),
                 "totalPapers": Paper.objects.count(),
+                "successRate": "100%"
             },
             "recentActivity": activity_list
         })
