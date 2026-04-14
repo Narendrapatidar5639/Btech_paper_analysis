@@ -45,8 +45,8 @@ export function AdminUploadPage() {
   useEffect(() => { fetchMetadata(); }, []);
 
   useEffect(() => {
-    if (formData.course && formData.semester) {
-      fetch(`http://127.0.0.1:8000/api/get-subjects/?branch=${formData.course}&semester=${formData.semester}`)
+    if (formData.course && formData.semester) {//const API_BASE_URL = "https://pattern-btech-backend.onrender.com/api";
+      fetch(`https://pattern-btech-backend.onrender.com/api/get-subjects/?branch=${formData.course}&semester=${formData.semester}`)
         .then(res => res.json())
         .then(data => setSubjects(data));
     }
@@ -55,7 +55,7 @@ export function AdminUploadPage() {
   const handleCreateNew = async () => {
     if (!showAddNew?.value) return;
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/admin/create-metadata/", {
+      const response = await fetch("https://pattern-btech-backend.onrender.com/api/admin/create-metadata/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -89,7 +89,7 @@ export function AdminUploadPage() {
     selectedFiles.forEach(f => data.append("files", f));
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/admin/upload/", { method: "POST", body: data });
+      const res = await fetch("https://pattern-btech-backend.onrender.com/api/admin/upload/", { method: "POST", body: data });
       if (res.ok) {
         setUploadProgress(100);
         toast.success("Dataset published to PatternBTech Cloud!");
