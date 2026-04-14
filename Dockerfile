@@ -12,4 +12,4 @@ ENV PORT=7860
 EXPOSE 7860
 
 # Sabse important: Gunicorn aur Migration ko batao ki manage.py kahan hai
-CMD ["sh", "-c", "python mainproject/manage.py migrate && gunicorn --chdir mainproject mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]
+CMD ["sh", "-c", "python mainproject/manage.py migrate && gunicorn --chdir mainproject mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 900"]
