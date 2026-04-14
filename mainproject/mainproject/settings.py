@@ -14,13 +14,8 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [
-    'pattern-btech-backend.onrender.com', 
-    'localhost', 
-    '127.0.0.1',
-    '.onrender.com' # Ye saare render subdomains allow kar dega
-]
-
+# settings.py mein ye line update karein
+ALLOWED_HOSTS = ['*']
 # --- APPLICATION DEFINITION ---
 
 INSTALLED_APPS = [

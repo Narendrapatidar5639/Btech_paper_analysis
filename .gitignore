@@ -1,5 +1,11 @@
 # Ignore Frontend (kyunki ye Vercel par hai)
+<<<<<<< HEAD
 frontend/
+=======
+#frontend/
+node_modules/
+frontend/node_modules/
+>>>>>>> hf-branch
 
 # Ignore local database and env
 db.sqlite3
