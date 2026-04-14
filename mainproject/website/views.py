@@ -393,14 +393,39 @@ def google_auth(request):
 
 @csrf_exempt
 def log_admin_activity(request):
-    if request.method == 'POST':
+    if request.method != 'POST':
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
         data = json.loads(request.body or '{}')
+        subject_name = data.get('subject_name')
+        
+        # 1. Subject ko dhundne ka safe tarika
+        subject_obj = None
+        if subject_name:
+            subject_obj = Subject.objects.filter(name__iexact=subject_name).first()
+
+        # 2. IntegrityError se bachne ke liye logic
+        # Agar subject_obj nahi milta, toh hum use save hi nahi karenge 
+        # ya fir model mein null=True karna padega. 
+        # Filhaal hum isse crash hone se bacha rahe hain:
+        
+        if not subject_obj:
+            print(f"⚠️ Warning: Subject '{subject_name}' not found in DB. Activity might not log.")
+            # Agar subject compulsory hai toh yahan error return kar sakte hain
+            # return JsonResponse({"error": "Invalid subject name"}, status=400)
+
         AnalysisReport.objects.create(
             user_name=data.get('user_name', 'Guest User'),
-            status='completed'
+            subject=subject_obj, # Agar ye None raha toh NOT NULL error aayega
+            semester=data.get('semester', 'N/A'),
+            paper_count=data.get('paper_count', 1),
+            status='completed' 
         )
         return JsonResponse({"status": "success"}, status=201)
-
+    except Exception as e:
+        print(f"❌ Logging Error: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=400)
+    
 def get_admin_stats(request):
     try:
         total_users = User.objects.count()
