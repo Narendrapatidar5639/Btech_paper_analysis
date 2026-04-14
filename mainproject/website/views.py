@@ -138,20 +138,36 @@ def analysis_dashboard(request):
             return JsonResponse({'error': 'Papers not found in DB'}, status=404)
 
         all_text = ""
-        # Local import to prevent circular dependency
-        from .utils import get_semantic_analysis as fetch_analysis
         
+        # loop through papers to get text
         for paper in papers:
             if paper.ocr_text and len(paper.ocr_text) > 50:
                 all_text += paper.ocr_text + " "
             else:
-                # OCR processing can be slow, normally this would be a celery task
-                print(f"🔍 OCR needed for Paper ID: {paper.id}")
-                # For now, we use existing text if available
-                if paper.ocr_text:
-                    all_text += paper.ocr_text + " "
+                # Agar text nahi hai, toh hum yahan extraction try karenge
+                print(f"🔍 Extracting text for Paper ID: {paper.id}")
+                try:
+                    # LOCAL IMPORT to check if docling is actually there
+                    from docling.document_converter import DocumentConverter
+                    converter = DocumentConverter()
+                    
+                    # Hugging Face/S3 compatibility check
+                    file_source = paper.pdf_file.url if hasattr(paper.pdf_file, 'url') else paper.pdf_file.path
+                    result = converter.convert(file_source)
+                    text = result.document.export_to_markdown() # Docling markdown output is great for AI
+                    
+                    if text:
+                        paper.ocr_text = text
+                        paper.save()
+                        all_text += text + " "
+                except ImportError:
+                    print("⚠️ Docling not found, skipping OCR.")
+                except Exception as e:
+                    print(f"⚠️ Extraction failed for {paper.id}: {e}")
 
-        analysis_result = fetch_analysis(all_text)
+        # Now get analysis from Groq (Make sure this function is in the same file or utils)
+        # Replacing the faulty fetch_analysis import with direct call if available
+        analysis_result = get_semantic_analysis(all_text)
 
         # Logging report
         try:
@@ -175,7 +191,7 @@ def analysis_dashboard(request):
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-
+    
 @csrf_exempt
 def admin_upload_papers(request):
     if request.method == 'POST':
