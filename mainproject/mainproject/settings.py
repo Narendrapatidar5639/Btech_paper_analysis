@@ -35,8 +35,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
-    'whitenoise.middleware.WhiteNoiseMiddleware',# SABSE UPAR: CORS handle karne ke liye
     "django.middleware.security.SecurityMiddleware",
+    'whitenoise.middleware.WhiteNoiseMiddleware',# SABSE UPAR: CORS handle karne ke liye
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -45,7 +45,6 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "mainproject.urls"
 
 TEMPLATES = [
     {
@@ -62,8 +61,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "mainproject.wsgi.application"
-
+ROOT_URLCONF = "mainproject.mainproject.urls"
+WSGI_APPLICATION = "mainproject.mainproject.wsgi.application"
 
 # --- DATABASE (Supabase / Postgres) ---
 
@@ -75,6 +74,9 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST'),
         'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': {
+            'sslmode': 'require', # Ye zaroori hai production ke liye
+        },
     }
 }
 
