@@ -24,5 +24,5 @@ COPY . .
 ENV PORT=7860
 EXPOSE 7860
 
-# Gunicorn se app start karein
-CMD ["sh", "-c", "python manage.py migrate && gunicorn mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]
+# Gunicorn ko asali wsgi file ka rasta batana hoga
+CMD ["sh", "-c", "python manage.py migrate && gunicorn mainproject.mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]
