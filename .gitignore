@@ -1,13 +1,11 @@
-# Environments
-bpa/
+# Ignore Frontend (kyunki ye Vercel par hai)
+frontend/
+
+# Ignore local database and env
+db.sqlite3
 .env
 __pycache__/
 *.pyc
 
-# Node
-node_modules/
-dist/
-
-# Local data
-db.sqlite3
+# Ignore media/uploads (agar local hain)
 media/
