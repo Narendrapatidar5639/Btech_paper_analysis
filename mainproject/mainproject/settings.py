@@ -13,10 +13,13 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+# 1. Ye sabse important hai HF ke liye
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # settings.py mein ye line update karein
 # settings.py mein ise aise update karein
-ALLOWED_HOSTS = ['*', 'narendrapatidarbtai-btech-backend.hf.space']
+ALLOWED_HOSTS = ['*', '.hf.space', 'localhost', '127.0.0.1']
 # --- APPLICATION DEFINITION ---
 
 INSTALLED_APPS = [
@@ -92,6 +95,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://patternbtech.vercel.app",
     "https://narendrapatidarbtai-btech-backend.hf.space",
+    "https://*.hf.space",
 ]
 
 # 4. SameSite settings taaki cookies cross-origin block na hon
