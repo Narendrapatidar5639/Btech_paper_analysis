@@ -15,7 +15,8 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 DEBUG = True
 
 # settings.py mein ye line update karein
-ALLOWED_HOSTS = ['*']
+# settings.py mein ise aise update karein
+ALLOWED_HOSTS = ['*', 'narendrapatidarbtai-btech-backend.hf.space']
 # --- APPLICATION DEFINITION ---
 
 INSTALLED_APPS = [
@@ -90,6 +91,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://patternbtech.vercel.app",
+    "https://narendrapatidarbtai-btech-backend.hf.space",
 ]
 
 # 4. SameSite settings taaki cookies cross-origin block na hon
