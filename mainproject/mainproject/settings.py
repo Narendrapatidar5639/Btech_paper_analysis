@@ -15,7 +15,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-x(u%jbs$!0cv=uk=&1y
 DEBUG = True
 
 # settings.py mein ye line update karein
-ALLOWED_HOSTS = ['narendrapatidarbtai-btech-backend.hf.space', 'localhost', '127.0.0.1', '.hf.space']
+ALLOWED_HOSTS = ['*']
 # --- APPLICATION DEFINITION ---
 
 INSTALLED_APPS = [
