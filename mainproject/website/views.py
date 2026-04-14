@@ -123,7 +123,7 @@ def show_papers(request):
         return JsonResponse(paper_list, safe=False)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-
+    
 def analysis_dashboard(request):
     paper_ids_raw = request.GET.get('paperIds') or request.GET.get('ids')
     if not paper_ids_raw:
@@ -134,63 +134,60 @@ def analysis_dashboard(request):
         paper_ids = [int(pid) for pid in clean_ids.split(',') if pid.strip()]
         papers = Paper.objects.filter(id__in=paper_ids)
         
-        if not papers.exists():
-            return JsonResponse({'error': 'Papers not found in DB'}, status=404)
-
         all_text = ""
         
-        # loop through papers to get text
+        # DEBUG: Check if papers are found
+        print(f"DEBUG: Found {papers.count()} papers in DB.")
+
         for paper in papers:
             if paper.ocr_text and len(paper.ocr_text) > 50:
+                print(f"DEBUG: Using cached OCR for Paper {paper.id}")
                 all_text += paper.ocr_text + " "
             else:
-                # Agar text nahi hai, toh hum yahan extraction try karenge
-                print(f"🔍 Extracting text for Paper ID: {paper.id}")
+                print(f"🔍 Extracting fresh text for Paper ID: {paper.id}")
                 try:
-                    # LOCAL IMPORT to check if docling is actually there
                     from docling.document_converter import DocumentConverter
                     converter = DocumentConverter()
                     
-                    # Hugging Face/S3 compatibility check
-                    file_source = paper.pdf_file.url if hasattr(paper.pdf_file, 'url') else paper.pdf_file.path
+                    # File Source check
+                    # HF par path use karna zyada safe hota hai agar media local hai
+                    file_source = paper.pdf_file.path 
+                    print(f"DEBUG: File path: {file_source}")
+
                     result = converter.convert(file_source)
-                    text = result.document.export_to_markdown() # Docling markdown output is great for AI
+                    text = result.document.export_to_markdown()
                     
                     if text:
                         paper.ocr_text = text
                         paper.save()
                         all_text += text + " "
-                except ImportError:
-                    print("⚠️ Docling not found, skipping OCR.")
+                        print(f"DEBUG: Successfully extracted {len(text)} characters.")
                 except Exception as e:
-                    print(f"⚠️ Extraction failed for {paper.id}: {e}")
+                    print(f"⚠️ Extraction failed for {paper.id}: {str(e)}")
 
-        # Now get analysis from Groq (Make sure this function is in the same file or utils)
-        # Replacing the faulty fetch_analysis import with direct call if available
+        # DEBUG: Check if all_text is empty
+        if not all_text.strip():
+            print("❌ ERROR: all_text is empty after OCR loop!")
+            return JsonResponse({'error': 'No text could be extracted from these papers.'}, status=200)
+
+        # Analysis logic
+        print(f"DEBUG: Sending {len(all_text)} chars to Groq.")
         analysis_result = get_semantic_analysis(all_text)
-
-        # Logging report
-        try:
-            first_paper = papers.first()
-            target_user = request.user if request.user.is_authenticated else None
-            AnalysisReport.objects.create(
-                user=target_user,
-                subject=first_paper.subject if first_paper else None,
-                paper=first_paper,
-                status='completed'
-            )
-        except: pass
+        print(f"DEBUG: Groq returned: {analysis_result}")
 
         return JsonResponse({
             'topics': analysis_result.get("topics", {}),
             'questions': analysis_result.get("questions", {}),
             'metadata': {
                 'paper_count': papers.count(),
+                'text_length': len(all_text), # Naya field track karne ke liye
                 'status': 'Neural Link Synchronized'
             }
         })
     except Exception as e:
+        print(f"🚨 Dashboard Exception: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
+    
     
 @csrf_exempt
 def admin_upload_papers(request):
@@ -206,18 +203,38 @@ def admin_upload_papers(request):
             branch = get_object_or_404(Branch, id=branch_id)
             subject = get_object_or_404(Subject, id=subject_id)
 
+            # OCR Converter initialize karein
+            from docling.document_converter import DocumentConverter
+            converter = DocumentConverter()
+
             uploaded_count = 0
             for f in files:
-                Paper.objects.create(
+                # 1. Pehle paper create karein
+                new_paper = Paper.objects.create(
                     university=university,
                     branch=branch,
                     semester=semester,
                     subject=subject,
                     pdf_file=f
                 )
+                
+                # 2. Turant OCR karein
+                try:
+                    print(f"📄 Processing OCR for: {f.name}")
+                    # Path use karein kyunki file abhi server par hai
+                    result = converter.convert(new_paper.pdf_file.path)
+                    extracted_text = result.document.export_to_markdown()
+                    
+                    if extracted_text:
+                        new_paper.ocr_text = extracted_text
+                        new_paper.save()
+                        print(f"✅ OCR Done for {f.name}")
+                except Exception as e:
+                    print(f"⚠️ OCR Failed for {f.name}: {e}")
+
                 uploaded_count += 1
 
-            return JsonResponse({'message': f'Uploaded {uploaded_count} papers.', 'status': 'success'}, status=201)
+            return JsonResponse({'message': f'Uploaded and Processed {uploaded_count} papers.', 'status': 'success'}, status=201)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
     return JsonResponse({'error': 'Invalid method'}, status=405)

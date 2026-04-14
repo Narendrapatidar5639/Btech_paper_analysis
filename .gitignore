@@ -1,4 +1,4 @@
-frontend/
+#frontend/
 node_modules/
 .env
 # Ignore local database and env
