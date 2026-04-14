@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# System dependencies (Updated for Debian Trixie/Slim compatibility)
 RUN apt-get update && apt-get install -y \
     build-essential \
     libgl1 \
@@ -18,9 +17,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all files
 COPY . .
 
-# Hugging Face fixed port
+# Yeh line Python ko folder dhundne mein madad karegi
+ENV PYTHONPATH=/app/mainproject:/app
+
 ENV PORT=7860
 EXPOSE 7860
 
-# Django startup command
+# Is command mein thoda change (wsgi ka path verify karein)
 CMD ["sh", "-c", "python manage.py migrate && gunicorn mainproject.wsgi:application --bind 0.0.0.0:7860 --timeout 300"]
