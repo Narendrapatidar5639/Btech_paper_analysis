@@ -1,7 +1,6 @@
 import json
 import os
 from django.conf import settings
-from django.db import models
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate, login, logout
@@ -9,13 +8,11 @@ from django.contrib.auth.models import User
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.timesince import timesince
 from django.utils import timezone
-from django.db.models import Count
-from django.contrib.auth.decorators import login_required
 
 # External Libraries
 from groq import Groq
 from dotenv import load_dotenv
-from pdf2image import convert_from_path
+from docling.document_converter import DocumentConverter
 
 # Firebase
 import firebase_admin
@@ -24,25 +21,11 @@ from firebase_admin import credentials, auth as firebase_auth
 # Import models
 from .models import University, Branch, Subject, Paper, AnalysisReport
 
-# Load environment variables
 load_dotenv()
-
-# Initialize Groq Client
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+doc_converter = DocumentConverter()
 
-# ---------------- LAZY LOAD TR-OCR (Server Optimization) ----------------
-_processor = None
-_model = None
-
-def get_ocr_resources():
-    global _processor, _model
-    if _processor is None or _model is None:
-        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-        _processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
-        _model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
-    return _processor, _model
-
-# Firebase Initialization
+# Firebase Init
 if not firebase_admin._apps:
     try:
         firebase_creds = {
@@ -58,30 +41,28 @@ if not firebase_admin._apps:
     except Exception as e:
         print(f"Firebase Init Warning: {e}")
 
-# ---------------- API HELPER FUNCTIONS ----------------
+# --- OCR & Analysis Logic ---
 
-def trocr_pdf_to_text(pdf_path):
-    text = ""
+def extract_text_with_docling(pdf_source):
+    """Cloud URL ya local path dono ko handle karta hai"""
     try:
-        processor, model = get_ocr_resources()
-        images = convert_from_path(pdf_path)
-        for img in images:
-            pixel_values = processor(images=img, return_tensors="pt").pixel_values
-            generated_ids = model.generate(pixel_values)
-            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-            text += generated_text.lower() + " "
+        result = doc_converter.convert(pdf_source)
+        return result.document.export_to_text().strip().lower()
     except Exception as e:
-        print(f"OCR Error: {e}")
-    return text
+        print(f"Docling OCR Error: {e}")
+        return ""
 
 def get_semantic_analysis(all_text):
+    if not all_text or len(all_text) < 100:
+        return {"topics": {}, "questions": {}}
+
     prompt = f"""
-    Analyze the following messy OCR text from BTech exam papers.
-    1. Extract top 10 technical TOPICS.
+    Analyze the following BTech exam paper text.
+    1. Extract top 10 technical TOPICS and their frequency.
     2. Extract top 5 REPEATED QUESTIONS.
     OUTPUT FORMAT (Strictly JSON):
-    {{ "topics": {{"Topic": 5}}, "questions": {{"Question": 3}} }}
-    OCR TEXT: {all_text[:12000]}
+    {{ "topics": {{"Topic Name": 5}}, "questions": {{"Question Text": 3}} }}
+    TEXT: {all_text[:15000]} 
     """
     try:
         completion = client.chat.completions.create(
@@ -91,9 +72,78 @@ def get_semantic_analysis(all_text):
         )
         return json.loads(completion.choices[0].message.content)
     except Exception as e:
-        print(f"Groq API Error: {e}")
         return {"topics": {}, "questions": {}}
 
+# --- Main API View ---
+
+# ... (Baki saare login/logout functions as it is rahenge) ...
+
+def analysis_dashboard(request):
+    paper_ids_raw = request.GET.get('paperIds') or request.GET.get('ids')
+    if not paper_ids_raw:
+        return JsonResponse({'error': 'No papers selected'}, status=400)
+
+    try:
+        # ID cleaning
+        clean_ids = str(paper_ids_raw).replace('[','').replace(']','')
+        paper_ids = [int(pid) for pid in clean_ids.split(',') if pid.strip()]
+        papers = Paper.objects.filter(id__in=paper_ids)
+        
+        if not papers.exists():
+            return JsonResponse({'error': 'Papers not found in DB'}, status=404)
+
+        all_text = ""
+        for paper in papers:
+            # Step 1: Check if OCR already exists in DB
+            if paper.ocr_text and len(paper.ocr_text) > 100:
+                all_text += paper.ocr_text + " "
+            else:
+                # Step 2: Cloud vs Local Path Handling
+                try:
+                    # Supabase/Cloud ke liye hamesha .url try karein pehle
+                    try:
+                        file_url = paper.pdf_file.url
+                    except:
+                        file_url = paper.pdf_file.path
+
+                    # Step 3: Extract text using Docling
+                    text = extract_text_with_docling(file_url)
+                    
+                    if text:
+                        paper.ocr_text = text
+                        paper.processed = True
+                        paper.save() # DB mein save karein taaki next time fast ho
+                        all_text += text + " "
+                except Exception as ocr_err:
+                    print(f"OCR Failed for Paper {paper.id}: {ocr_err}")
+
+        # Step 4: Final AI Analysis
+        analysis_result = get_semantic_analysis(all_text)
+
+        # Step 5: Log Activity
+        try:
+            first_paper = papers.first()
+            AnalysisReport.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                subject=first_paper.subject if first_paper else None,
+                paper=first_paper,
+                status='completed'
+            )
+        except:
+            pass
+
+        return JsonResponse({
+            'topics': analysis_result.get("topics", {}),
+            'questions': analysis_result.get("questions", {}),
+            'metadata': {
+                'paper_count': papers.count(),
+                'analyzed_ids': paper_ids,
+                'status': 'Analysis Complete'
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'error': f"Pipeline Error: {str(e)}"}, status=500)
+    
 # ---------------- MAIN API VIEWS ----------------
 
 def home(request):
@@ -143,68 +193,6 @@ def show_papers(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-def analysis_dashboard(request):
-    paper_ids_raw = request.GET.get('paperIds') or request.GET.get('ids')
-    if not paper_ids_raw:
-        return JsonResponse({'error': 'No papers selected'}, status=400)
-
-    try:
-        clean_ids = str(paper_ids_raw).replace('[','').replace(']','')
-        paper_ids = [int(pid) for pid in clean_ids.split(',') if pid.strip()]
-        papers = Paper.objects.filter(id__in=paper_ids)
-        
-        if not papers.exists():
-            return JsonResponse({'error': 'Papers not found in DB'}, status=404)
-
-        all_text = ""
-        # Local or Server OCR handling
-        for paper in papers:
-            if paper.ocr_text and len(paper.ocr_text) > 50:
-                all_text += paper.ocr_text + " "
-            else:
-                try:
-                    # Server par file.path fail ho sakta hai agar cloud use ho raha ho
-                    try:
-                        file_path = paper.pdf_file.path
-                    except:
-                        file_path = paper.pdf_file.url
-                    
-                    text = trocr_pdf_to_text(file_path)
-                    if text:
-                        paper.ocr_text = text
-                        paper.processed = True
-                        paper.save()
-                        all_text += text + " "
-                except Exception as ocr_err:
-                    print(f"OCR Error for Paper {paper.id}: {ocr_err}")
-
-        analysis_result = get_semantic_analysis(all_text)
-
-        # Logging
-        try:
-            first_paper = papers.first()
-            target_user = request.user if request.user.is_authenticated else None
-            AnalysisReport.objects.create(
-                user=target_user,
-                subject=first_paper.subject if first_paper else None,
-                paper=first_paper,
-                status='completed'
-            )
-        except Exception as save_error:
-            print(f"Report Logging Error: {save_error}")
-
-        return JsonResponse({
-            'topics': analysis_result.get("topics", {}),
-            'questions': analysis_result.get("questions", {}),
-            'metadata': {
-                'paper_count': papers.count(),
-                'analyzed_ids': paper_ids,
-                'user': request.user.username if request.user.is_authenticated else "Guest",
-                'status': 'Neural Link Synchronized'
-            }
-        })
-    except Exception as e:
-        return JsonResponse({'error': f"Server Pipeline Error: {str(e)}"}, status=500)
 
 # ---------------- ADMIN UPLOAD & METADATA ----------------
 
