@@ -1,0 +1,11 @@
+# Ignore Frontend (kyunki ye Vercel par hai)
+frontend/
+
+# Ignore local database and env
+db.sqlite3
+.env
+__pycache__/
+*.pyc
+
+# Ignore media/uploads (agar local hain)
+media/
